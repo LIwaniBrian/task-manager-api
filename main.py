@@ -47,6 +47,13 @@ def get_completed_tasks(db=Depends(get_db)):
     return tasks
 
 
+@app.get("/tasks/pending", response_model=list[TaskResponse])
+def get_pending_tasks(db=Depends(get_db)):
+    tasks = db.query(Task).filter(Task.completed == False).all()
+
+    return tasks
+
+
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
 def get_task(task_id: int, db=Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
