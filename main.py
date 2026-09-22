@@ -54,6 +54,26 @@ def get_pending_tasks(db=Depends(get_db)):
     return tasks
 
 
+@app.get("/tasks/stats")
+def get_task_stats(db=Depends(get_db)):
+    total = db.query(Task).count()
+    completed = db.query(Task).filter(Task.completed == True).count()
+    pending = db.query(Task).filter(Task.completed == False).count()
+
+    return {
+        "total": total,
+        "completed": completed,
+        "pending": pending
+    }
+
+
+@app.get("/tasks/search", response_model=list[TaskResponse])
+def search_tasks(title: str, db=Depends(get_db)):
+    tasks = db.query(Task).filter(Task.title.ilike(f"%{title}%")).all()
+
+    return tasks
+
+
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
 def get_task(task_id: int, db=Depends(get_db)):
     task = db.query(Task).filter(Task.id == task_id).first()
