@@ -1,4 +1,4 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Query
 from database import engine
 from database import engine, get_db
 from models import Base, Task
@@ -34,8 +34,20 @@ def create_task(task: TaskCreate, db=Depends(get_db)):
 
 
 @app.get("/tasks", response_model=list[TaskResponse])
-def get_tasks(db=Depends(get_db)):
-    tasks = db.query(Task).all()
+def get_tasks(
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=10, ge=1, le=100),
+    sort: str = Query(default="asc", pattern="^(asc|desc)$"),
+    db=Depends(get_db)
+):
+    query = db.query(Task)
+
+    if sort == "asc":
+        query = query.order_by(Task.id.asc())
+    else:
+        query = query.order_by(Task.id.desc())
+
+    tasks = query.offset(skip).limit(limit).all()
 
     return tasks
 
@@ -68,8 +80,23 @@ def get_task_stats(db=Depends(get_db)):
 
 
 @app.get("/tasks/search", response_model=list[TaskResponse])
-def search_tasks(title: str, db=Depends(get_db)):
-    tasks = db.query(Task).filter(Task.title.ilike(f"%{title}%")).all()
+def search_tasks(
+    keyword: str,
+    skip: int = Query(default=0, ge=0),
+    limit: int = Query(default=10, ge=1, le=100),
+    db=Depends(get_db)
+):
+    tasks = (
+        db.query(Task)
+        .filter(
+            (Task.title.ilike(f"%{keyword}%")) |
+            (Task.description.ilike(f"%{keyword}%"))
+        )
+        .order_by(Task.id.asc())
+        .offset(skip)
+        .limit(limit)
+        .all()
+    )
 
     return tasks
 
