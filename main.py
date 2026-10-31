@@ -1,8 +1,9 @@
 from fastapi import FastAPI, Depends, HTTPException, Query
 from database import engine
 from database import engine, get_db
-from models import Base, Task
-from schemas import TaskCreate, TaskUpdate, TaskResponse
+from models import Base, Task, User
+from schemas import TaskCreate, TaskUpdate, TaskResponse, UserCreate, UserResponse
+from security import hash_password
 
 app = FastAPI()
 
@@ -144,3 +145,30 @@ def delete_task(task_id: int, db=Depends(get_db)):
     db.commit()
 
     return {"message": "Task deleted successfully"}
+
+
+@app.post("/register", response_model=UserResponse, status_code=201)
+def register_user(user: UserCreate, db=Depends(get_db)):
+
+    existing_user = db.query(User).filter(
+        (User.username == user.username) |
+        (User.email == user.email)
+    ).first()
+
+    if existing_user:
+        raise HTTPException(
+            status_code=409,
+            detail="Username or email already registered"
+        )
+
+    new_user = User(
+        username=user.username,
+        email=user.email,
+        hashed_password=hash_password(user.password)
+    )
+
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+
+    return new_user
