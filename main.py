@@ -3,11 +3,51 @@ from database import engine
 from database import engine, get_db
 from models import Base, Task, User
 from schemas import TaskCreate, TaskUpdate, TaskResponse, UserCreate, UserResponse
-from security import hash_password
+from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
+from security import hash_password, create_access_token, verify_password, verify_access_token
 
 app = FastAPI()
 
 Base.metadata.create_all(bind=engine)
+
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="login",
+    scheme_name="JWT"
+)
+
+
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db=Depends(get_db)
+):
+    user_id = verify_access_token(token)
+
+    if user_id is None:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid or expired token",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    user = db.query(User).filter(
+        User.id == int(user_id)
+    ).first()
+
+    if user is None:
+        raise HTTPException(
+            status_code=401,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    return user
+
+
+@app.get("/users/me", response_model=UserResponse)
+def read_current_user(
+    current_user: User = Depends(get_current_user)
+):
+    return current_user
 
 
 @app.get("/")
@@ -172,3 +212,32 @@ def register_user(user: UserCreate, db=Depends(get_db)):
     db.refresh(new_user)
 
     return new_user
+
+
+@app.post("/login")
+def login_user(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db=Depends(get_db)
+):
+    user = db.query(User).filter(
+        User.username == form_data.username
+    ).first()
+
+    if not user or not verify_password(
+        form_data.password,
+        user.hashed_password
+    ):
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"}
+        )
+
+    access_token = create_access_token(
+        data={"sub": str(user.id)}
+    )
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer"
+    }
