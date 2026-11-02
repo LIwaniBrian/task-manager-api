@@ -61,10 +61,16 @@ def test_database(db=Depends(get_db)):
 
 
 @app.post("/tasks", response_model=TaskResponse)
-def create_task(task: TaskCreate, db=Depends(get_db)):
+def create_task(
+    task: TaskCreate,
+    db=Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     new_task = Task(
         title=task.title,
-        description=task.description
+        description=task.description,
+        due_date=task.due_date,
+        owner_id=current_user.id
     )
 
     db.add(new_task)
@@ -79,9 +85,12 @@ def get_tasks(
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=10, ge=1, le=100),
     sort: str = Query(default="asc", pattern="^(asc|desc)$"),
-    db=Depends(get_db)
+    db=Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    query = db.query(Task)
+    query = db.query(Task).filter(
+        Task.owner_id == current_user.id
+    )
 
     if sort == "asc":
         query = query.order_by(Task.id.asc())
@@ -94,24 +103,49 @@ def get_tasks(
 
 
 @app.get("/tasks/completed", response_model=list[TaskResponse])
-def get_completed_tasks(db=Depends(get_db)):
-    tasks = db.query(Task).filter(Task.completed == True).all()
+def get_completed_tasks(
+    db=Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    tasks = db.query(Task).filter(
+        Task.completed == True,
+        Task.owner_id == current_user.id
+    ).all()
 
     return tasks
 
 
 @app.get("/tasks/pending", response_model=list[TaskResponse])
-def get_pending_tasks(db=Depends(get_db)):
-    tasks = db.query(Task).filter(Task.completed == False).all()
+def get_pending_tasks(
+    db=Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    return db.query(Task).filter(
+        Task.completed == False,
+        Task.owner_id == current_user.id
+    ).all()
 
     return tasks
 
 
 @app.get("/tasks/stats")
-def get_task_stats(db=Depends(get_db)):
-    total = db.query(Task).count()
-    completed = db.query(Task).filter(Task.completed == True).count()
-    pending = db.query(Task).filter(Task.completed == False).count()
+def get_task_stats(
+    db=Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    query = db.query(Task).filter(
+        Task.owner_id == current_user.id
+    )
+
+    total = query.count()
+
+    completed = query.filter(
+        Task.completed == True
+    ).count()
+
+    pending = query.filter(
+        Task.completed == False
+    ).count()
 
     return {
         "total": total,
@@ -125,13 +159,17 @@ def search_tasks(
     keyword: str,
     skip: int = Query(default=0, ge=0),
     limit: int = Query(default=10, ge=1, le=100),
-    db=Depends(get_db)
+    db=Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
     tasks = (
         db.query(Task)
         .filter(
-            (Task.title.ilike(f"%{keyword}%")) |
-            (Task.description.ilike(f"%{keyword}%"))
+            Task.owner_id == current_user.id,
+            (
+                (Task.title.ilike(f"%{keyword}%")) |
+                (Task.description.ilike(f"%{keyword}%"))
+            )
         )
         .order_by(Task.id.asc())
         .offset(skip)
@@ -143,21 +181,42 @@ def search_tasks(
 
 
 @app.get("/tasks/{task_id}", response_model=TaskResponse)
-def get_task(task_id: int, db=Depends(get_db)):
-    task = db.query(Task).filter(Task.id == task_id).first()
+def get_task(
+    task_id: int,
+    db=Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    task = db.query(Task).filter(
+        Task.id == task_id,
+        Task.owner_id == current_user.id
+    ).first()
 
     if task is None:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found"
+        )
 
     return task
 
 
 @app.put("/tasks/{task_id}", response_model=TaskResponse)
-def update_task(task_id: int, task: TaskUpdate, db=Depends(get_db)):
-    existing_task = db.query(Task).filter(Task.id == task_id).first()
+def update_task(
+    task_id: int,
+    task: TaskUpdate,
+    db=Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    existing_task = db.query(Task).filter(
+        Task.id == task_id,
+        Task.owner_id == current_user.id
+    ).first()
 
     if existing_task is None:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found"
+        )
 
     if task.title is not None:
         existing_task.title = task.title
@@ -168,6 +227,9 @@ def update_task(task_id: int, task: TaskUpdate, db=Depends(get_db)):
     if task.completed is not None:
         existing_task.completed = task.completed
 
+    if task.due_date is not None:
+        existing_task.due_date = task.due_date
+
     db.commit()
     db.refresh(existing_task)
 
@@ -175,11 +237,21 @@ def update_task(task_id: int, task: TaskUpdate, db=Depends(get_db)):
 
 
 @app.delete("/tasks/{task_id}")
-def delete_task(task_id: int, db=Depends(get_db)):
-    task = db.query(Task).filter(Task.id == task_id).first()
+def delete_task(
+    task_id: int,
+    db=Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    task = db.query(Task).filter(
+        Task.id == task_id,
+        Task.owner_id == current_user.id
+    ).first()
 
     if task is None:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(
+            status_code=404,
+            detail="Task not found"
+        )
 
     db.delete(task)
     db.commit()

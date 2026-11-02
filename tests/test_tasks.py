@@ -6,7 +6,8 @@ from sqlalchemy.orm import sessionmaker
 
 from database import get_db
 from main import app
-from models import Base
+from models import Base, User
+from security import hash_password, create_access_token
 
 
 TEST_DATABASE_URL = "sqlite:///./test_tasks.db"
@@ -36,9 +37,34 @@ def client():
 
     app.dependency_overrides[get_db] = override_get_db
 
+    # Create a test user
+    db = TestingSessionLocal()
+
+    test_user = User(
+        username="testuser",
+        email="test@example.com",
+        hashed_password=hash_password("TestPassword123")
+    )
+
+    db.add(test_user)
+    db.commit()
+    db.refresh(test_user)
+
+    # Generate a JWT token for the test user
+    token = create_access_token(
+        data={"sub": str(test_user.id)}
+    )
+
+    db.close()
+
     try:
         with TestClient(app) as test_client:
+            test_client.headers.update({
+                "Authorization": f"Bearer {token}"
+            })
+
             yield test_client
+
     finally:
         app.dependency_overrides.clear()
         Base.metadata.drop_all(bind=test_engine)
