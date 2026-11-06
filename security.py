@@ -1,6 +1,10 @@
 from datetime import datetime, timedelta, timezone
 from jose import jwt, JWTError
 from pwdlib import PasswordHash
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 password_hash = PasswordHash.recommended()
 
@@ -15,7 +19,10 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 
 password_hash = PasswordHash.recommended()
 
-SECRET_KEY = "replace-this-with-a-secure-random-secret"
+SECRET_KEY = os.getenv("SECRET_KEY")
+
+if not SECRET_KEY:
+    raise RuntimeError("SECRET_KEY is missing. Check your .env file.")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
 

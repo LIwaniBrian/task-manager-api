@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 from database import get_db
 from main import app
-from models import Base, User
+from models import Base, User, Task
 from security import hash_password, create_access_token
 
 
@@ -258,3 +258,156 @@ def test_search_tasks_by_description(client):
 
     assert len(data) == 1
     assert data[0]["title"] == "University work"
+
+
+def test_user_cannot_access_another_users_task(client):
+    # Create a second user
+    db = TestingSessionLocal()
+    second_user = User(
+        username="seconduser",
+        email="second@example.com",
+        hashed_password=hash_password("SecondPassword123")
+    )
+    db.add(second_user)
+    db.commit()
+    db.refresh(second_user)
+
+    # Create a task belonging to the second user
+    other_task = Task(
+        title="Private task",
+        description="This belongs to another user",
+        owner_id=second_user.id
+    )
+    db.add(other_task)
+    db.commit()
+    db.refresh(other_task)
+
+    task_id = other_task.id
+    db.close()
+
+    # The client is authenticated as the first user.
+    response = client.get(f"/tasks/{task_id}")
+
+    assert response.status_code == 404
+
+
+def test_user_cannot_update_another_users_task(client):
+    db = TestingSessionLocal()
+    second_user = User(
+        username="seconduser",
+        email="second@example.com",
+        hashed_password=hash_password("SecondPassword123")
+    )
+    db.add(second_user)
+    db.commit()
+    db.refresh(second_user)
+
+    other_task = Task(
+        title="Private task",
+        description="Belongs to another user",
+        owner_id=second_user.id
+    )
+    db.add(other_task)
+    db.commit()
+    task_id = other_task.id
+    db.close()
+
+    response = client.put(
+        f"/tasks/{task_id}",
+        json={"title": "Hacked task"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_user_cannot_delete_another_users_task(client):
+    db = TestingSessionLocal()
+    second_user = User(
+        username="seconduser",
+        email="second@example.com",
+        hashed_password=hash_password("SecondPassword123")
+    )
+    db.add(second_user)
+    db.commit()
+    db.refresh(second_user)
+
+    other_task = Task(
+        title="Private task",
+        description="Belongs to another user",
+        owner_id=second_user.id
+    )
+    db.add(other_task)
+    db.commit()
+    task_id = other_task.id
+    db.close()
+
+    response = client.delete(f"/tasks/{task_id}")
+
+    assert response.status_code == 404
+
+
+def test_stats_only_include_current_users_tasks(client):
+    # Get the current user's statistics
+    original_stats = client.get("/tasks/stats").json()
+
+    db = TestingSessionLocal()
+
+    # Create another user
+    second_user = User(
+        username="seconduser",
+        email="second@example.com",
+        hashed_password=hash_password("SecondPassword123")
+    )
+    db.add(second_user)
+    db.commit()
+    db.refresh(second_user)
+
+    # Give that user two tasks
+    db.add_all([
+        Task(
+            title="Other completed task",
+            completed=True,
+            owner_id=second_user.id
+        ),
+        Task(
+            title="Other pending task",
+            completed=False,
+            owner_id=second_user.id
+        )
+    ])
+
+    db.commit()
+    db.close()
+
+    # The first user's statistics should remain unchanged
+    updated_stats = client.get("/tasks/stats").json()
+
+    assert updated_stats == original_stats
+
+
+def test_search_only_returns_current_users_tasks(client):
+    db = TestingSessionLocal()
+
+    second_user = User(
+        username="seconduser",
+        email="second@example.com",
+        hashed_password=hash_password("SecondPassword123")
+    )
+    db.add(second_user)
+    db.commit()
+    db.refresh(second_user)
+
+    db.add(
+        Task(
+            title="Secret Python project",
+            description="Belongs to another user",
+            owner_id=second_user.id
+        )
+    )
+    db.commit()
+    db.close()
+
+    response = client.get("/tasks/search?keyword=Secret")
+
+    assert response.status_code == 200
+    assert response.json() == []
